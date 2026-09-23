@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>INFS7410 Final Oral Exam Booking</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">The University of Queensland</div>
+    <h1 id="title">INFS7410 Final Oral Exam Booking</h1>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="demo" class="banner warn" hidden>DEMO MODE — no API URL configured in config.js. Bookings are not saved.</div>
+  <div id="closed" class="banner bad" hidden>Booking is currently closed.</div>
+  <p id="notice" class="notice"></p>
+
+  <section id="stepCalendar">
+    <h2><span class="num">1</span> Choose a day</h2>
+    <p class="muted">Numbers show how many exam places are still available that day. Times are Brisbane time.</p>
+    <div id="calendar"><p class="muted">Loading available slots…</p></div>
+  </section>
+
+  <section id="stepTime" hidden>
+    <h2><span class="num">2</span> Choose a time — <span id="dayLabel"></span></h2>
+    <div id="times" class="times"></div>
+  </section>
+
+  <section id="stepForm" hidden>
+    <h2><span class="num">3</span> Your details</h2>
+    <div class="chosen" id="chosen"></div>
+    <form id="form" novalidate>
+      <label>Full name
+        <input id="name" autocomplete="name" maxlength="100" required>
+      </label>
+      <label>Student number <span class="muted">(8 digits, numbers only)</span>
+        <input id="studentNumber" inputmode="numeric" autocomplete="off" maxlength="8" pattern="\d{8}" required placeholder="e.g. 45123456">
+      </label>
+      <div class="hint" id="uqHint"></div>
+      <label>UQ student email
+        <span class="muted">— the letter <b>s</b>, then the <b>first 7 digits</b> of your student number, then <b>@student.uq.edu.au</b></span>
+        <input id="email" type="email" autocomplete="off" maxlength="200" required>
+      </label>
+      <div class="hint" id="emailHint"></div>
+
+      <fieldset>
+        <legend>Please confirm</legend>
+        <label class="check"><input type="checkbox" id="confirmDetails">
+          <span>Please carefully check your booking answers. Are you sure your student number and its format are correct?
+          <b>(If we cannot find this student number, you may receive a 0 for your final oral exam.)</b></span></label>
+        <label class="check"><input type="checkbox" id="confirmFirstBooking">
+          <span>Is this the first time you are booking? <b>You can only book once.</b> If you have already booked before,
+          one of your bookings will be randomly cancelled.</span></label>
+      </fieldset>
+
+      <div id="error" class="banner bad" hidden role="alert"></div>
+      <div class="actions">
+        <button type="button" class="ghost" id="back">Change time</button>
+        <button type="submit" id="submit">Confirm booking</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="stepDone" hidden>
+    <div class="done">
+      <h2>✓ Booking confirmed</h2>
+      <dl id="doneDetails"></dl>
+      <p id="doneEmail"></p>
+      <p class="muted">Please take a screenshot of this page for your records. To change your booking, email the teaching team — do not book again.</p>
+    </div>
+  </section>
+
+  <footer class="muted" id="footer"></footer>
+</main>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
