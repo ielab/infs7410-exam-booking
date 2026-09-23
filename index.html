@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'">
 <title>INFS7410 Final Oral Exam Booking</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -18,6 +20,7 @@
 <main class="wrap">
   <div id="demo" class="banner warn" hidden>DEMO MODE — no API URL configured in config.js. Bookings are not saved.</div>
   <div id="closed" class="banner bad" hidden>Booking is currently closed.</div>
+  <div id="stale" class="banner warn" hidden role="status"></div>
   <p id="notice" class="notice"></p>
 
   <section id="stepCalendar">
@@ -29,6 +32,7 @@
 
   <section id="stepTime" hidden>
     <h2><span class="num">2</span> Choose a time — <span id="dayLabel"></span></h2>
+    <div id="timeMsg" class="banner bad" hidden role="alert" tabindex="-1"></div>
     <div id="times" class="times"></div>
   </section>
 
@@ -36,18 +40,18 @@
     <h2><span class="num">3</span> Your details</h2>
     <div class="chosen" id="chosen"></div>
     <form id="form" novalidate>
-      <label>Full name
-        <input id="name" autocomplete="name" maxlength="100" required>
-      </label>
-      <label>Student number <span class="muted">(8 digits, numbers only)</span>
-        <input id="studentNumber" inputmode="numeric" autocomplete="off" maxlength="8" pattern="\d{8}" required placeholder="e.g. 45123456">
-      </label>
-      <div class="hint" id="uqHint"></div>
-      <label>UQ student email
-        <span class="muted">— the letter <b>s</b>, then the <b>first 7 digits</b> of your student number, then <b>@student.uq.edu.au</b></span>
-        <input id="email" type="email" autocomplete="off" maxlength="200" required>
-      </label>
-      <div class="hint" id="emailHint"></div>
+      <label for="name">Full name</label>
+      <input id="name" autocomplete="name" maxlength="100" required aria-describedby="nameHint">
+      <div class="hint" id="nameHint" aria-live="polite"></div>
+
+      <label for="studentNumber">Student number <span class="muted">(8 digits, numbers only)</span></label>
+      <input id="studentNumber" inputmode="numeric" autocomplete="off" required placeholder="e.g. 45123456" aria-describedby="uqHint">
+      <div class="hint" id="uqHint" aria-live="polite"></div>
+
+      <label for="email">UQ student email
+        <span class="muted">— the letter <b>s</b>, then the <b>first 7 digits</b> of your student number, then <b>@student.uq.edu.au</b></span></label>
+      <input id="email" type="email" autocomplete="off" maxlength="200" required aria-describedby="emailHint">
+      <div class="hint" id="emailHint" aria-live="polite"></div>
 
       <fieldset>
         <legend>Please confirm</legend>
@@ -59,17 +63,26 @@
           one of your bookings will be randomly cancelled.</span></label>
       </fieldset>
 
-      <div id="error" class="banner bad" hidden role="alert"></div>
+      <div id="error" class="banner bad" hidden role="alert" tabindex="-1"></div>
       <div class="actions">
         <button type="button" class="ghost" id="back">Change time</button>
-        <button type="submit" id="submit">Confirm booking</button>
+        <button type="submit" id="submit">Review booking</button>
       </div>
     </form>
+
+    <div id="review" class="review" hidden>
+      <h3 tabindex="-1" id="reviewTitle">Please double-check — you can only book once</h3>
+      <dl id="reviewDetails"></dl>
+      <div class="actions">
+        <button type="button" class="ghost" id="edit">Edit details</button>
+        <button type="button" id="confirmBook">Yes, book this slot</button>
+      </div>
+    </div>
   </section>
 
   <section id="stepDone" hidden>
     <div class="done">
-      <h2>✓ Booking confirmed</h2>
+      <h2 tabindex="-1" id="doneTitle">✓ Booking confirmed</h2>
       <dl id="doneDetails"></dl>
       <p id="doneEmail"></p>
       <p class="muted">Please take a screenshot of this page for your records. To change your booking, email the teaching team — do not book again.</p>

@@ -1,6 +1,8 @@
 /* INFS7410 oral exam booking — student page. Talks to the Apps Script backend (config.js). */
 (function () {
   'use strict';
+  if (window.top !== window.self) { try { window.top.location = window.location.href; } catch (e) { /* framed cross-origin */ } }
+
   const API = (window.BOOKING_API_URL || '').trim();
   const DEMO = !API;
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -11,52 +13,91 @@
   const utc = ds => { const p = ds.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
   const ymd = t => new Date(t).toISOString().slice(0, 10);
   const human = ds => { const d = new Date(utc(ds)); return DAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTH[d.getUTCMonth()] + ' ' + d.getUTCFullYear(); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const jitter = (a, b) => a + Math.random() * (b - a);
+  const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'’\-]*$/u;
 
-  let DATA = null, day = null, slot = null, submitting = false, done = false;
+  let DATA = null, day = null, slot = null, submitting = false, done = false, pending = null;
 
   // ---------------------------------------------------------------- API
+  const OVERLOADED = 'The booking server is overloaded right now. Please wait a minute and try again.';
+  const NET = 'Could not reach the booking server. Please check your internet connection and try again.';
+  const MAYBE = ' (If you pressed "Yes, book this slot", your booking may already be saved — check your UQ email first. ' +
+    'Trying again is safe: you will never be booked twice.)';
+
+  async function fetchJson(url, opts, timeoutMs) {
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    try {
+      const res = await fetch(url, Object.assign({ redirect: 'follow', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }, opts));
+      const text = await res.text();
+      try { return { json: JSON.parse(text) }; } catch (e) { return { kind: 'overloaded' }; } // Google returned an HTML error page
+    } catch (err) {
+      return { kind: err && err.name === 'AbortError' ? 'timeout' : 'network' };
+    } finally { if (timer) clearTimeout(timer); }
+  }
+
+  /** GET retries on anything; POST retries only on "busy", overload, timeout or network — safe because the
+   *  server treats a repeated booking for the same student + slot as the same booking. */
   async function api(method, body) {
     if (DEMO) return demoApi(method, body);
-    const opts = method === 'GET' ? { method: 'GET' } :
+    const isGet = method === 'GET';
+    const opts = isGet ? { method: 'GET' } :
       // text/plain avoids a CORS preflight, which Apps Script cannot answer
       { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) };
-    const url = method === 'GET' ? API + '?action=slots&t=' + Date.now() : API;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const res = await fetch(url, Object.assign({ redirect: 'follow', cache: 'no-store' }, opts));
-        const json = await res.json();
-        if (json && json.ok === false && /busy/i.test(json.message || '') && attempt < 2) { await sleep(1500 + attempt * 1500); continue; }
-        return json;
-      } catch (err) {
-        if (method !== 'GET' || attempt === 2) {
-          // A POST may have reached the server even if the reply was lost — never silently retry a booking.
-          return { ok: false, network: true, message: 'Could not reach the booking server. Check your connection. ' +
-            (method === 'POST' ? 'Your booking may or may not have been saved — check your email before trying again.' : 'Please reload the page.') };
-        }
-        await sleep(1500);
+    const tries = isGet ? 3 : 4;
+    let last = null;
+    for (let attempt = 0; attempt < tries; attempt++) {
+      const url = isGet ? API + '?action=slots&t=' + Date.now() : API;
+      const r = await fetchJson(url, opts, isGet ? 15000 : 40000);
+      if (r.json && !(r.json.ok === false && r.json.busy)) return r.json;
+      last = r.json || r;
+      if (attempt < tries - 1) {
+        if (!isGet) $('submit').textContent = $('confirmBook').textContent = 'Busy — retrying…';
+        await sleep(isGet ? jitter(1000, 3000) : jitter(2000, 8000));
       }
     }
+    if (last && last.busy) return { ok: false, message: last.message + (isGet ? '' : ' Please try again in a minute.' + MAYBE) };
+    const msg = last && last.kind === 'network' ? NET : OVERLOADED;
+    return { ok: false, transport: true, message: msg + (isGet ? '' : MAYBE) };
   }
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // Show the last known availability instantly (from this browser), then refresh from the server.
   // Bookings are always re-checked live on the server, so a stale number can never overbook a slot.
-  const CACHE = 'infs7410-booking-cache-v1';
+  const CACHE = 'infs7410-booking-cache-v2';
+  const CACHE_MAX_AGE = 10 * 60e3;
   function fromCache() {
-    try { const c = JSON.parse(localStorage.getItem(CACHE) || 'null'); if (c && Date.now() - c.at < 30 * 60e3 && c.api === API) return c.data; } catch (e) {}
+    try { const c = JSON.parse(localStorage.getItem(CACHE) || 'null'); if (c && Date.now() - c.at < CACHE_MAX_AGE && c.api === API) return c; } catch (e) {}
     return null;
   }
+  const valid = r => r && r.ok && r.config && Array.isArray(r.slots);
 
+  let loading = false;
   async function load(first) {
-    if (first && !DEMO) { const c = fromCache(); if (c) { apply(c); $('updating').hidden = false; } }
-    const r = await api('GET');
-    $('updating').hidden = true;
-    if (!r || !r.ok) { if (!DATA) $('calendar').innerHTML = '<div class="banner bad">' + esc((r && r.message) || 'Could not load slots.') + '</div>'; return; }
-    try { localStorage.setItem(CACHE, JSON.stringify({ at: Date.now(), api: API, data: r })); } catch (e) {}
-    apply(r);
+    if (loading) return; loading = true;
+    try {
+      let cachedAt = null;
+      if (first && !DEMO) { const c = fromCache(); if (c && valid(c.data)) { apply(c.data); cachedAt = c.at; $('updating').hidden = false; } }
+      const r = await api('GET');
+      $('updating').hidden = true;
+      if (!valid(r)) {
+        const msg = (r && r.message) || 'Could not load slots.';
+        if (!DATA) { $('calendar').innerHTML = '<div class="banner bad">' + esc(msg) + ' Please reload the page.</div>'; return; }
+        const at = new Date(cachedAt || DATA._at || Date.now());
+        showStale('Could not refresh availability — showing places left as of ' + at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) +
+          '; it may be out of date. Your booking is always checked live.');
+        return;
+      }
+      $('stale').hidden = true;
+      r._at = Date.now();
+      try { localStorage.setItem(CACHE, JSON.stringify({ at: Date.now(), api: API, data: r })); } catch (e) {}
+      apply(r);
+    } finally { loading = false; }
   }
+  function showStale(m) { $('stale').textContent = m; $('stale').hidden = false; }
 
   function apply(r) {
+    const focus = document.activeElement && (document.activeElement.dataset || {});
     DATA = r;
     const c = r.config;
     document.title = c.courseCode + ' ' + c.examName + ' Booking';
@@ -64,13 +105,26 @@
     $('notice').textContent = c.notice || '';
     $('closed').hidden = c.bookingOpen;
     $('demo').hidden = !DEMO;
-    $('footer').innerHTML = 'Questions? Email <a href="mailto:' + esc(c.contactEmail) + '">' + esc(c.contactEmail) + '</a>';
-    if (day && slot) { // keep selection if still valid
-      slot = r.slots.find(s => s.id === slot.id) || null;
+    $('footer').textContent = '';
+    $('footer').append('Questions? Email ');
+    if (/^[^\s@<>"]+@[^\s@<>"]+$/.test(c.contactEmail || '')) {
+      const a = document.createElement('a'); a.href = 'mailto:' + c.contactEmail; a.textContent = c.contactEmail; $('footer').append(a);
     }
     renderCalendar();
-    if (day) renderTimes();
+    if (day) {
+      renderTimes();
+      if (slot) {
+        const now = r.slots.find(s => s.id === slot.id);
+        if (!now || !bookable(now)) { // the chosen time is gone or full: keep details, ask for another time
+          slot = null; renderTimes(); closeForm();
+          timeMsg('The time you chose is no longer available. Please pick another time — your details are kept.');
+        } else slot = now;
+      }
+    }
+    if (focus && focus.date) { const el = document.querySelector('button.cal-cell[data-date="' + focus.date + '"]'); if (el) el.focus({ preventScroll: true }); }
+    if (focus && focus.id) { const el = document.querySelector('button.time[data-id="' + CSS.escape(focus.id) + '"]'); if (el) el.focus({ preventScroll: true }); }
   }
+  const bookable = s => s.open && s.remaining > 0 && DATA.config.bookingOpen;
 
   // ---------------------------------------------------------------- calendar
   function renderCalendar() {
@@ -78,31 +132,37 @@
     DATA.slots.forEach(s => (byDate[s.date] = byDate[s.date] || []).push(s));
     const dates = Object.keys(byDate).sort();
     if (!dates.length) { $('calendar').innerHTML = '<p class="muted">No exam slots are available yet. Please check back later.</p>'; return; }
+    const weekend = dates.some(d => [0, 6].includes(new Date(utc(d)).getUTCDay()));
+    const cols = weekend ? 7 : 5;
+    const heads = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].slice(0, cols);
     const from = dates[0], to = dates[dates.length - 1];
     let t = utc(from); t -= ((new Date(t).getUTCDay() + 6) % 7) * 864e5; // Monday of first week
-    let html = '', lastMonth = -1;
+    let html = '', lastMonth = '';
     for (; t <= utc(to); t += 7 * 864e5) {
-      const m = new Date(t + 4 * 864e5).getUTCMonth();
-      if (m !== lastMonth) {
-        html += '<div class="month">' + MONTH[m] + ' ' + new Date(t + 4 * 864e5).getUTCFullYear() + '</div>' +
-          '<div class="cal-head"><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div></div>';
-        lastMonth = m;
+      const weekDates = Array.from({ length: cols }, (_, i) => ymd(t + i * 864e5));
+      const firstReal = weekDates.find(d => byDate[d]) || weekDates[0];
+      const mKey = firstReal.slice(0, 7);
+      if (!weekDates.some(d => byDate[d])) continue; // skip empty weeks
+      if (mKey !== lastMonth) {
+        const md = new Date(utc(firstReal));
+        html += '<div class="month">' + MONTH[md.getUTCMonth()] + ' ' + md.getUTCFullYear() + '</div>' +
+          '<div class="cal-head cols' + cols + '">' + heads.map(h => '<div>' + h + '</div>').join('') + '</div>';
+        lastMonth = mKey;
       }
-      html += '<div class="cal-row">';
-      for (let i = 0; i < 5; i++) {
-        const ds = ymd(t + i * 864e5), d = new Date(t + i * 864e5);
+      html += '<div class="cal-row cols' + cols + '">';
+      weekDates.forEach(ds => {
+        const d = new Date(utc(ds));
         const label = d.getUTCDate() + ' ' + MON[d.getUTCMonth()];
         const list = byDate[ds];
-        if (!list) { html += '<div class="cal-cell ' + (ds < from || ds > to ? 'out' : 'none') + '"><div class="d">' + label + '</div></div>'; continue; }
+        if (!list) { html += '<div class="cal-cell ' + (ds < from || ds > to ? 'out' : 'none') + '"><div class="d">' + label + '</div></div>'; return; }
         const left = list.filter(s => s.open).reduce((a, s) => a + s.remaining, 0);
-        const bookable = left > 0 && DATA.config.bookingOpen;
-        const cls = bookable ? 'avail' : 'full';
-        const meta = left > 0 ? left + (left === 1 ? ' place' : ' places') + ' left' : (list.some(s => s.open) ? 'Full' : 'Closed');
-        html += bookable
-          ? '<button type="button" class="cal-cell ' + cls + (ds === day ? ' sel' : '') + '" data-date="' + ds + '" aria-label="' + esc(human(ds) + ', ' + meta) + '">' +
-            '<div class="d">' + label + '</div><div class="m">' + meta + '</div></button>'
-          : '<div class="cal-cell ' + cls + '"><div class="d">' + label + '</div><div class="m">' + meta + '</div></div>';
-      }
+        const ok = left > 0 && DATA.config.bookingOpen;
+        const meta = left > 0 ? left + (left === 1 ? ' place' : ' places') + ' left' : (list.some(s => s.open) ? 'Full' : 'Too soon');
+        html += ok
+          ? '<button type="button" class="cal-cell avail' + (ds === day ? ' sel' : '') + '" data-date="' + ds + '" aria-pressed="' + (ds === day) + '" aria-label="' +
+            esc(human(ds) + ', ' + meta) + '"><div class="d">' + label + '</div><div class="m">' + meta + '</div></button>'
+          : '<div class="cal-cell full" aria-label="' + esc(human(ds) + ', ' + meta) + '"><div class="d">' + label + '</div><div class="m">' + meta + '</div></div>';
+      });
       html += '</div>';
     }
     $('calendar').innerHTML = html;
@@ -111,35 +171,40 @@
   $('calendar').addEventListener('click', e => {
     const c = e.target.closest('button.cal-cell'); if (!c || done) return;
     day = c.dataset.date; slot = null;
-    renderCalendar(); renderTimes();
-    $('stepForm').hidden = true;
+    renderCalendar(); renderTimes(); closeForm(); timeMsg('');
+    const again = document.querySelector('button.cal-cell[data-date="' + day + '"]'); if (again) again.focus({ preventScroll: true });
     $('stepTime').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   function renderTimes() {
     const list = DATA.slots.filter(s => s.date === day).sort((a, b) => a.start < b.start ? -1 : 1);
     $('dayLabel').textContent = human(day);
-    $('times').innerHTML = list.map(s => {
-      const ok = s.open && s.remaining > 0 && DATA.config.bookingOpen;
-      const label = !s.open ? 'Closed for online booking' : s.remaining > 0 ? s.remaining + ' of ' + s.capacity + ' places left' : 'Full';
-      return '<button type="button" class="time' + (slot && slot.id === s.id ? ' sel' : '') + '" data-id="' + esc(s.id) + '"' + (ok ? '' : ' disabled') +
-        '><b>' + s.start + ' – ' + s.end + '</b><span>' + label + '</span></button>';
-    }).join('');
+    const hrs = DATA.config.minHoursBefore;
+    $('times').innerHTML = list.length ? list.map(s => {
+      const ok = bookable(s);
+      const label = !s.open ? 'Too soon to book online (less than ' + hrs + ' h away)' : s.remaining > 0 ? s.remaining + ' of ' + s.capacity + ' places left' : 'Full';
+      const sel = slot && slot.id === s.id;
+      return '<button type="button" class="time' + (sel ? ' sel' : '') + '" data-id="' + esc(s.id) + '" aria-pressed="' + !!sel + '"' + (ok ? '' : ' disabled') +
+        '><b>' + esc(s.start) + ' – ' + esc(s.end) + '</b><span>' + esc(label) + '</span></button>';
+    }).join('') : '<p class="muted">No times left on this day. Please choose another day.</p>';
     $('stepTime').hidden = false;
   }
+  function timeMsg(m) { $('timeMsg').textContent = m; $('timeMsg').hidden = !m; if (m) { $('timeMsg').focus({ preventScroll: true }); $('stepTime').scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
 
   $('times').addEventListener('click', e => {
     const b = e.target.closest('button.time'); if (!b || b.disabled || done) return;
     slot = DATA.slots.find(s => s.id === b.dataset.id);
-    renderTimes();
+    renderTimes(); timeMsg('');
     $('chosen').textContent = human(slot.date) + ', ' + slot.start + ' – ' + slot.end + ' (Brisbane time)';
     $('error').hidden = true;
-    $('stepForm').hidden = false;
+    openForm();
     $('stepForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
     $('name').focus({ preventScroll: true });
   });
 
-  $('back').addEventListener('click', () => { $('stepForm').hidden = true; $('stepTime').scrollIntoView({ behavior: 'smooth' }); });
+  function openForm() { $('stepForm').hidden = false; $('form').hidden = false; $('review').hidden = true; }
+  function closeForm() { $('stepForm').hidden = true; $('review').hidden = true; $('form').hidden = false; pending = null; }
+  $('back').addEventListener('click', () => { closeForm(); $('stepTime').scrollIntoView({ behavior: 'smooth' }); });
 
   // ---------------------------------------------------------------- form
   const expectedEmail = num => DATA && num.length === 8
@@ -151,68 +216,102 @@
   // Only warns on mismatch — never displays the "correct" address, so students check their own details.
   function checkEmailMatch() {
     const num = $('studentNumber').value.trim(), email = $('email').value.trim().toLowerCase();
-    const h = $('emailHint');
     const bad = num.length === 8 && email.length > 0 && email !== expectedEmail(num);
-    h.textContent = bad ? '⚠ ' + MISMATCH : '';
-    h.className = bad ? 'hint warn' : 'hint';
+    setHint('emailHint', bad ? '⚠ ' + MISMATCH : '', bad, 'email');
     return !bad;
   }
+  function setHint(id, text, warn, field) {
+    $(id).textContent = text; $(id).className = warn ? 'hint warn' : 'hint';
+    if (field) $(field).setAttribute('aria-invalid', warn ? 'true' : 'false');
+  }
 
+  const digitsOnly = v => String(v || '').normalize('NFKC').replace(/\D/g, '');
   $('studentNumber').addEventListener('input', e => {
-    const v = e.target.value.replace(/\D/g, '').slice(0, 8);
+    if (e.isComposing) return;
+    const v = digitsOnly(e.target.value);
     if (v !== e.target.value) e.target.value = v;
-    $('uqHint').textContent = v.length && v.length < 8 ? (8 - v.length) + ' more digit' + (8 - v.length === 1 ? '' : 's') + ' needed.' : '';
+    if (v.length > 8) setHint('uqHint', 'That is ' + v.length + ' digits — a student number has exactly 8. Please check it.', true, 'studentNumber');
+    else setHint('uqHint', v.length && v.length < 8 ? (8 - v.length) + ' more digit' + (8 - v.length === 1 ? '' : 's') + ' needed.' : '', false, 'studentNumber');
     if ($('emailHint').textContent) checkEmailMatch();
   });
+  $('studentNumber').addEventListener('compositionend', e => e.target.dispatchEvent(new Event('input')));
   $('studentNumber').addEventListener('blur', () => { if ($('email').value) checkEmailMatch(); });
   $('email').addEventListener('blur', checkEmailMatch);
   $('email').addEventListener('input', () => { if ($('emailHint').textContent) checkEmailMatch(); });
+  $('name').addEventListener('blur', () => {
+    const n = $('name').value.trim();
+    setHint('nameHint', n && !NAME_RE.test(n) ? 'Please use letters only (spaces, hyphens and apostrophes are fine).' : '', !!n && !NAME_RE.test(n), 'name');
+  });
 
-  function showError(msg) { $('error').textContent = msg; $('error').hidden = false; $('error').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  function showError(msg, field) {
+    $('review').hidden = true; $('form').hidden = false;
+    $('error').textContent = msg; $('error').hidden = false;
+    if (field) { $(field).focus(); $(field).scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    else { $('error').focus({ preventScroll: true }); $('error').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }
 
-  $('form').addEventListener('submit', async e => {
+  $('form').addEventListener('submit', e => {
     e.preventDefault();
     if (submitting || done) return;
-    const name = $('name').value.trim().replace(/\s+/g, ' ');
-    const num = $('studentNumber').value.trim();
-    const email = $('email').value.trim();
-    ['name', 'studentNumber', 'email'].forEach(id => $(id).classList.add('touched'));
-    if (!slot) return showError('Please choose a time first.');
-    if (name.length < 2) return showError('Please enter your full name.');
-    if (!/^\d{8}$/.test(num)) return showError('Student number must be exactly 8 digits, numbers only.');
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Please enter a valid email address.');
-    if (!$('confirmDetails').checked || !$('confirmFirstBooking').checked) return showError('Please read and tick both confirmation boxes.');
-    if (!checkEmailMatch()) return showError(MISMATCH);
-    if (!confirm('Please double-check before confirming:\n\nName: ' + name + '\nStudent number: ' + num + '\nEmail: ' + email +
-      '\nSlot: ' + human(slot.date) + ' ' + slot.start + '–' + slot.end + '\n\nYou can only book once. Confirm this booking?')) return;
-
-    submitting = true;
-    $('submit').disabled = true; $('submit').textContent = 'Booking…';
     $('error').hidden = true;
-    const r = await api('POST', { action: 'book', name: name, studentNumber: num, email: email, slotId: slot.id,
-      confirmDetails: true, confirmFirstBooking: true });
-    submitting = false;
-    $('submit').disabled = false; $('submit').textContent = 'Confirm booking';
-
-    if (r && r.ok) return showDone(r);
-    showError((r && r.message) || 'Something went wrong. Please try again.');
-    if (r && r.refresh) { await load(); if (slot && !(slot.open && slot.remaining > 0)) { slot = null; $('stepForm').hidden = true; } }
+    const name = $('name').value.trim().replace(/\s+/g, ' ');
+    const num = digitsOnly($('studentNumber').value);
+    const email = $('email').value.trim();
+    if (!slot) return showError('Please choose a time first.');
+    if (Array.from(name).length < 2) return showError('Please enter your full name.', 'name');
+    if (!NAME_RE.test(name)) return showError('Please enter your name using letters only (spaces, hyphens and apostrophes are fine).', 'name');
+    if (!/^\d{8}$/.test(num)) return showError('Student number must be exactly 8 digits, numbers only.', 'studentNumber');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Please enter a valid email address.', 'email');
+    if (!checkEmailMatch()) return showError(MISMATCH, 'email');
+    if (!$('confirmDetails').checked || !$('confirmFirstBooking').checked) return showError('Please read and tick both confirmation boxes.', 'confirmDetails');
+    pending = { action: 'book', name: name, studentNumber: num, email: email, slotId: slot.id, confirmDetails: true, confirmFirstBooking: true };
+    $('reviewDetails').innerHTML = [['Name', name], ['Student number', num], ['UQ email', email],
+      ['Exam time', human(slot.date) + ', ' + slot.start + ' – ' + slot.end + ' (Brisbane time)']]
+      .map(r => '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>').join('');
+    $('form').hidden = true; $('review').hidden = false;
+    $('reviewTitle').focus({ preventScroll: true });
+    $('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+
+  $('edit').addEventListener('click', () => { $('review').hidden = true; $('form').hidden = false; $('name').focus(); });
+
+  $('confirmBook').addEventListener('click', async () => {
+    if (submitting || done || !pending) return;
+    submitting = true;
+    $('confirmBook').disabled = $('edit').disabled = true; $('confirmBook').textContent = 'Booking…';
+    const r = await api('POST', pending);
+    submitting = false;
+    $('confirmBook').disabled = $('edit').disabled = false; $('confirmBook').textContent = 'Yes, book this slot';
+    $('submit').textContent = 'Review booking';
+    if (r && r.ok) return showDone(r);
+    if (r && r.refresh) {
+      await load();
+      if (!slot || !DATA.slots.some(s => s.id === slot.id && bookable(s))) {
+        slot = null; renderTimes(); closeForm();
+        return timeMsg((r.message || 'That time is no longer available.') + ' Your details are kept — just pick another time.');
+      }
+    }
+    showError((r && r.message) || 'Something went wrong. Please try again.');
+  });
+
+  window.addEventListener('beforeunload', e => { if (submitting) { e.preventDefault(); e.returnValue = ''; } });
 
   function showDone(r) {
     done = true;
     const b = r.booking;
     ['stepCalendar', 'stepTime', 'stepForm'].forEach(id => { $(id).hidden = true; });
-    $('doneDetails').innerHTML =
-      '<dt>Reference</dt><dd>' + esc(b.id) + '</dd>' +
-      '<dt>Name</dt><dd>' + esc(b.name) + '</dd>' +
-      '<dt>Student number</dt><dd>' + esc(b.number) + '</dd>' +
-      '<dt>Date &amp; time</dt><dd>' + esc(human(b.date)) + ', ' + esc(b.start) + ' – ' + esc(b.end) + ' (Brisbane time)</dd>';
-    $('doneEmail').innerHTML = r.emailSent
-      ? 'A confirmation email (with a calendar invite) has been sent to <b>' + esc(b.uqEmail) + '</b>' + '. Check your junk folder if you do not see it.'
-      : '<div class="banner warn">Your booking is saved, but the confirmation email could not be sent right now. ' +
-        'It will be resent later — please keep a screenshot of this page.</div>';
+    $('stale').hidden = true;
+    $('doneDetails').innerHTML = [['Reference', b.id], ['Name', b.name], ['Student number', b.number],
+      ['Date & time', human(b.date) + ', ' + b.start + ' – ' + b.end + ' (Brisbane time)']]
+      .map(x => '<dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd>').join('');
+    $('doneEmail').innerHTML = r.duplicate
+      ? 'This booking was already saved earlier — you are booked. A confirmation email was sent to <b>' + esc(b.uqEmail) + '</b>.'
+      : r.emailSent
+        ? 'A confirmation email (with a calendar invite) has been sent to <b>' + esc(b.uqEmail) + '</b>. Check your junk folder if you do not see it.'
+        : '<div class="banner warn">Your booking is saved, but the confirmation email could not be sent right now. ' +
+          'It will be sent automatically later — please keep a screenshot of this page.</div>';
     $('stepDone').hidden = false;
+    $('doneTitle').focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -242,10 +341,12 @@
       if (!s || s.remaining <= 0) return { ok: false, refresh: true, message: 'Sorry, that slot has just been filled.' };
       s.remaining--; demoState.booked[body.studentNumber] = true;
       return { ok: true, emailSent: true, booking: { id: 'DEMO1234', name: body.name, number: body.studentNumber, date: s.date, start: s.start, end: s.end,
-        uqEmail: 's' + body.studentNumber.slice(0, 7) + '@student.uq.edu.au', email: body.email } };
+        uqEmail: 's' + body.studentNumber.slice(0, 7) + '@student.uq.edu.au' } };
     });
   }
 
   load(true);
-  setInterval(() => { if (!done && !submitting && document.visibilityState === 'visible') load(); }, 60000); // keep counts fresh
+  const poll = () => setTimeout(() => { if (!done && !submitting && document.visibilityState === 'visible') load(); poll(); }, jitter(80000, 110000));
+  poll();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !done && !submitting && DATA && Date.now() - (DATA._at || 0) > 60000) load(); });
 })();
