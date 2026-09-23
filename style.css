@@ -81,3 +81,16 @@ button:focus-visible, .cal-cell:focus-visible, input:focus-visible { outline: 3p
   .cal-cell .m { font-size: 11px; }
   header h1 { font-size: 21px; }
 }
+
+.lookup { padding: 10px 16px; }
+.lookup summary { cursor: pointer; color: var(--uq); padding: 4px 0; }
+.lookup-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; margin-top: 10px; }
+.lookup-grid label { display: block; font-weight: 600; margin-bottom: 4px; }
+.lookup-grid input { width: 100%; padding: 10px; font-size: 16px; border: 1px solid #888; border-radius: 8px; }
+.lookup-card { margin-top: 12px; border-radius: 10px; padding: 12px 14px; }
+.lookup-card.ok { background: #e8f5e9; border: 1px solid #2e7d32; }
+.lookup-card.cancelled { background: #fde8e8; border: 1px solid var(--bad); }
+.lookup-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 6px 0 0; }
+.lookup-card dt { color: #555; } .lookup-card dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.access { background: #f1e8f8; border-radius: 8px; padding: 10px 14px; }
+@media (max-width: 560px) { .lookup-grid { grid-template-columns: 1fr; } }

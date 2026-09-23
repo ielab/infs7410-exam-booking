@@ -317,6 +317,27 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  // ---------------------------------------------------------------- check my booking
+  $('lkNumber').addEventListener('input', e => { const v = digitsOnly(e.target.value); if (v !== e.target.value) e.target.value = v; });
+  $('lookupForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const num = digitsOnly($('lkNumber').value), ref = $('lkRef').value.trim().toUpperCase().replace(/[^0-9A-F]/g, '');
+    const out = $('lkResult');
+    if (!/^\d{8}$/.test(num)) { out.innerHTML = '<div class="banner bad">Student number must be exactly 8 digits.</div>'; return; }
+    if (!/^[0-9A-F]{8}$/.test(ref)) { out.innerHTML = '<div class="banner bad">The booking reference is the 8-character code on your confirmation (e.g. D1AD9172).</div>'; return; }
+    $('lkBtn').disabled = true; $('lkBtn').textContent = 'Checking…';
+    const r = await api('POST', { action: 'lookup', studentNumber: num, reference: ref });
+    $('lkBtn').disabled = false; $('lkBtn').textContent = 'Check';
+    if (!r || !r.ok) { out.innerHTML = '<div class="banner bad">' + esc((r && r.message) || 'Could not check right now. Please try again.') + '</div>'; return; }
+    const b = r.booking, cancelled = b.status !== 'CONFIRMED';
+    out.innerHTML = '<div class="lookup-card ' + (cancelled ? 'cancelled' : 'ok') + '"><b>' +
+      (cancelled ? 'This booking was CANCELLED.' : '✓ You are booked.') + '</b><dl>' +
+      [['Reference', b.id], ['Name', b.name], ['Student number', b.number],
+       ['Date & time', human(b.date) + ', ' + b.start + ' – ' + b.end + ' (Brisbane time)']]
+        .map(x => '<dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd>').join('') + '</dl>' +
+      (cancelled ? '<p>You can make a new booking below, or email the teaching team if this is unexpected.</p>' : '') + '</div>';
+  });
+
   // ---------------------------------------------------------------- demo mode (no backend)
   let demoState = null;
   function demoApi(method, body) {
@@ -337,6 +358,7 @@
       const config = { courseCode: 'INFS7410', examName: 'Final Oral Exam', contactEmail: 'INFS7410@eecs.uq.edu.au', bookingOpen: true,
         minHoursBefore: 24, studentEmailDomain: 'student.uq.edu.au', uqEmailDigits: 7, notice: 'Demo data only.' };
       if (method === 'GET') return { ok: true, config: config, slots: demoState.slots };
+      if (body.action === 'lookup') return { ok: false, message: 'Demo mode: lookup needs the real booking server.' };
       if (body.email.toLowerCase() !== 's' + body.studentNumber.slice(0, 7) + '@student.uq.edu.au') return { ok: false, message: 'Your UQ student email does not match your student number.' };
       if (demoState.booked[body.studentNumber]) return { ok: false, message: 'Student number ' + body.studentNumber + ' already has a confirmed booking — you can only book once.' };
       const s = demoState.slots.find(x => x.id === body.slotId);

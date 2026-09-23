@@ -23,6 +23,22 @@
   <div id="stale" class="banner warn" hidden role="status"></div>
   <p id="notice" class="notice"></p>
 
+  <section id="lookup" class="lookup">
+    <details id="lookupBox">
+      <summary><b>Already booked? Check your booking</b> — no email needed</summary>
+      <form id="lookupForm" novalidate>
+        <div class="lookup-grid">
+          <div><label for="lkNumber">Student number</label>
+            <input id="lkNumber" inputmode="numeric" autocomplete="off" placeholder="8 digits"></div>
+          <div><label for="lkRef">Booking reference (access code)</label>
+            <input id="lkRef" autocomplete="off" autocapitalize="characters" maxlength="12" placeholder="e.g. D1AD9172"></div>
+          <div class="lookup-btn"><button type="submit" id="lkBtn">Check</button></div>
+        </div>
+      </form>
+      <div id="lkResult" role="status" aria-live="polite"></div>
+    </details>
+  </section>
+
   <section id="stepCalendar">
     <h2><span class="num">1</span> Choose a day</h2>
     <p class="muted">Numbers show how many exam places are still available that day. Times are Brisbane time.
@@ -85,6 +101,8 @@
       <h2 tabindex="-1" id="doneTitle">✓ Booking confirmed</h2>
       <dl id="doneDetails"></dl>
       <p id="doneEmail"></p>
+      <p class="access">Your <b>booking reference is your access code</b>. With it and your student number you can check your booking at any time
+        using <b>“Already booked? Check your booking”</b> at the top of this page — even if the email does not arrive.</p>
       <p class="muted">Please take a screenshot of this page for your records. To change your booking, email the teaching team — do not book again.</p>
     </div>
   </section>
