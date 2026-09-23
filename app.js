@@ -303,7 +303,8 @@
     const b = r.booking;
     ['stepCalendar', 'stepTime', 'stepForm'].forEach(id => { $(id).hidden = true; });
     $('stale').hidden = true;
-    $('doneDetails').innerHTML = [['Reference', b.id], ['Name', b.name], ['Student number', b.number],
+    $('refCode').textContent = b.id;
+    $('doneDetails').innerHTML = [['Name', b.name], ['Student number', b.number],
       ['Date & time', human(b.date) + ', ' + b.start + ' – ' + b.end + ' (Brisbane time)']]
       .map(x => '<dt>' + esc(x[0]) + '</dt><dd>' + esc(x[1]) + '</dd>').join('');
     $('doneEmail').innerHTML = r.duplicate

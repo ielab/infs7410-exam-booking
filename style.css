@@ -94,3 +94,11 @@ button:focus-visible, .cal-cell:focus-visible, input:focus-visible { outline: 3p
 .lookup-card dt { color: #555; } .lookup-card dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .access { background: #f1e8f8; border-radius: 8px; padding: 10px 14px; }
 @media (max-width: 560px) { .lookup-grid { grid-template-columns: 1fr; } }
+
+.refbox { margin: 14px 0 16px; padding: 16px 18px; border: 3px solid var(--uq); border-radius: 12px; background: #fdfbff; text-align: center; }
+.refbox-label { font-size: 15px; font-weight: 700; color: var(--uq); text-transform: uppercase; letter-spacing: .04em; }
+.refbox-code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 44px; font-weight: 800; letter-spacing: .12em;
+  color: #111; margin: 6px 0 10px; user-select: all; overflow-wrap: anywhere; }
+.refbox-warn { font-size: 18px; font-weight: 800; color: var(--bad); }
+.refbox-why { font-size: 14px; color: #444; margin-top: 6px; }
+@media (max-width: 560px) { .refbox-code { font-size: 34px; } .refbox-warn { font-size: 16px; } }
