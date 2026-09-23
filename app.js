@@ -39,9 +39,24 @@
   }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  async function load() {
+  // Show the last known availability instantly (from this browser), then refresh from the server.
+  // Bookings are always re-checked live on the server, so a stale number can never overbook a slot.
+  const CACHE = 'infs7410-booking-cache-v1';
+  function fromCache() {
+    try { const c = JSON.parse(localStorage.getItem(CACHE) || 'null'); if (c && Date.now() - c.at < 30 * 60e3 && c.api === API) return c.data; } catch (e) {}
+    return null;
+  }
+
+  async function load(first) {
+    if (first && !DEMO) { const c = fromCache(); if (c) { apply(c); $('updating').hidden = false; } }
     const r = await api('GET');
-    if (!r || !r.ok) { $('calendar').innerHTML = '<div class="banner bad">' + esc((r && r.message) || 'Could not load slots.') + '</div>'; return; }
+    $('updating').hidden = true;
+    if (!r || !r.ok) { if (!DATA) $('calendar').innerHTML = '<div class="banner bad">' + esc((r && r.message) || 'Could not load slots.') + '</div>'; return; }
+    try { localStorage.setItem(CACHE, JSON.stringify({ at: Date.now(), api: API, data: r })); } catch (e) {}
+    apply(r);
+  }
+
+  function apply(r) {
     DATA = r;
     const c = r.config;
     document.title = c.courseCode + ' ' + c.examName + ' Booking';
@@ -231,6 +246,6 @@
     });
   }
 
-  load();
+  load(true);
   setInterval(() => { if (!done && !submitting && document.visibilityState === 'visible') load(); }, 60000); // keep counts fresh
 })();
