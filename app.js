@@ -235,8 +235,10 @@
     if ($('emailHint').textContent) checkEmailMatch();
   });
   $('studentNumber').addEventListener('compositionend', e => e.target.dispatchEvent(new Event('input')));
-  $('studentNumber').addEventListener('blur', () => { if ($('email').value) checkEmailMatch(); });
-  $('email').addEventListener('blur', checkEmailMatch);
+  // Delay the check a moment after leaving a field, so a click on the next control lands before the warning moves the layout.
+  const laterCheck = () => setTimeout(() => { if ($('email').value) checkEmailMatch(); }, 350);
+  $('studentNumber').addEventListener('blur', laterCheck);
+  $('email').addEventListener('blur', laterCheck);
   $('email').addEventListener('input', () => { if ($('emailHint').textContent) checkEmailMatch(); });
   $('name').addEventListener('blur', () => {
     const n = $('name').value.trim();
